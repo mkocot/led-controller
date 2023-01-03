@@ -1,4 +1,5 @@
 #include "config.hpp"
+#include "led.hpp"
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -8,62 +9,11 @@
 #include <map>
 #include <string>
 
-class LED
-{
-private:
-  uint8_t pin;
-  // TODO(m): Set to 0 if done fiddling with it
-  uint16_t duty{128};
-  bool is_enabled{false};
-
-public:
-  LED(uint8_t _pin) : pin(_pin) {}
-
-  void begin()
-  {
-    on();
-  }
-
-  // void brightness(float _brightness)
-  // {
-  //   log10f(brightness) * 255;
-  // }
-
-  void dutycycle(const uint8_t _duty)
-  {
-    duty = _duty;
-    on();
-  }
-  uint8_t dutycycle() const
-  {
-    return duty;
-  }
-
-  // Frequency is shared, no way around it
-  static int frequency(uint16_t _freq)
-  {
-    if (_freq < 100 || _freq > 40000)
-    {
-      return 1;
-    }
-    analogWriteFreq(_freq);
-  }
-
-  void on()
-  {
-    analogWrite(pin, duty);
-    is_enabled = true;
-  }
-
-  void off()
-  {
-    analogWrite(pin, 0);
-    is_enabled = false;
-  }
-
-  bool is_on() const {
-    return is_enabled;
-  }
+std::array<LED, 4> LEDS = {
+    LED(D1),
+    LED(D2),
+    LED(D5),
+    LED(D6),
 };
 
 enum LED_ID
@@ -76,13 +26,6 @@ enum LED_ID
   LED_NONE = -2,
 };
 
-std::array<LED, 4> LEDS = {
-    LED(D1),
-    LED(D2),
-    LED(D5),
-    LED(D6),
-};
-
 std::map<String, LED_ID> NAME2ID = {
     {"red", LED_RED},
     {"green", LED_GREEN},
@@ -93,10 +36,9 @@ std::map<String, LED_ID> NAME2ID = {
 
 AsyncWebServer server(80);
 
-
 using led_action = void(AsyncWebServerRequest *req, LED &led);
-
-static std::function<void(AsyncWebServerRequest *)> api_led(led_action f);
+// Wrapper for led api
+static std::function<void(AsyncWebServerRequest *)> api_led(const led_action f);
 
 static void api_pwm_frequency(AsyncWebServerRequest *req);
 static void api_pwm_range(AsyncWebServerRequest *req);
@@ -104,7 +46,7 @@ static void api_led_duty(AsyncWebServerRequest *req, LED &l);
 static void api_led_on(AsyncWebServerRequest *req, LED &l);
 static void api_led_off(AsyncWebServerRequest *req, LED &l);
 
-static int extract_number(AsyncWebServerRequest *req, const String &name, int &value)
+static int extract_number(const AsyncWebServerRequest *req, const String &name, int &value)
 {
   auto param = req->getParam(name);
   if (param == nullptr)
@@ -120,7 +62,7 @@ static int extract_number(AsyncWebServerRequest *req, const String &name, int &v
   return 0;
 }
 
-static LED_ID extract_led_id(AsyncWebServerRequest *req)
+static LED_ID extract_led_id(const AsyncWebServerRequest *req)
 {
   auto name = req->getParam("name");
   if (name == nullptr)
@@ -137,9 +79,7 @@ static LED_ID extract_led_id(AsyncWebServerRequest *req)
   return possible_name->second;
 }
 
-using led_action = void(AsyncWebServerRequest *req, LED &led);
-
-static std::function<void(AsyncWebServerRequest *)> api_led(led_action f)
+static std::function<void(AsyncWebServerRequest *)> api_led(const led_action f)
 {
   return [f](AsyncWebServerRequest *req)
   {
@@ -232,12 +172,18 @@ void api_led_off(AsyncWebServerRequest *req, LED &l)
   req->send(200, "text/plain", "OK");
 }
 
+
+
+// Common Arduino functions
 void setup()
 {
+  // First ensure PWM is correctly set so we don't wait for wifi with all LEDs
+  // at full power
   for (auto &led : LEDS)
   {
     led.begin();
   }
+
   Serial.begin(9600);
   delay(1000);
   Serial.println("Serial done");
