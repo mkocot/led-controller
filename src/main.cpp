@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
+#include <ESPAsyncUDP.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncElegantOTA.h>
@@ -10,9 +11,9 @@
 #include <string>
 
 std::array<LED, 4> LEDS = {
-    LED(D1),
-    LED(D2),
-    LED(D5),
+    LED(D1, 0),
+    LED(D2, 0),
+    LED(D5, 0),
     LED(D6),
 };
 
@@ -34,6 +35,8 @@ std::map<String, LED_ID> NAME2ID = {
     {"all", LED_ALL},
 };
 
+AsyncUDP udp;
+
 AsyncWebServer server(80);
 
 using led_action = void(AsyncWebServerRequest *req, LED &led);
@@ -45,6 +48,7 @@ static void api_pwm_range(AsyncWebServerRequest *req);
 static void api_led_duty(AsyncWebServerRequest *req, LED &l);
 static void api_led_on(AsyncWebServerRequest *req, LED &l);
 static void api_led_off(AsyncWebServerRequest *req, LED &l);
+static void udp_api_packet(AsyncUDPPacket packet);
 
 static int extract_number(const AsyncWebServerRequest *req, const String &name, int &value)
 {
@@ -172,7 +176,40 @@ void api_led_off(AsyncWebServerRequest *req, LED &l)
   req->send(200, "text/plain", "OK");
 }
 
+void udp_api_packet(AsyncUDPPacket packet) {
+  // Expecting 4 bytes
+  // [R][G][B][W]
+  if (packet.length() != 4) {
+    return;
+  }
+  auto data = packet.data();
+  LEDS[LED_RED].dutycycle(data[0]);
+  LEDS[LED_GREEN].dutycycle(data[1]);
+  LEDS[LED_BLUE].dutycycle(data[2]);
+  LEDS[LED_WHITE].dutycycle(data[3]);
+}
 
+static void setupUdp() {
+  if (!udp.listen(6969)) {
+    return;
+  }
+
+  udp.onPacket(udp_api_packet);
+}
+
+static void setupAPI() {
+  // OTA
+  AsyncElegantOTA.begin(&server);
+
+  // PWM
+  server.on("/api/v1/pwm/frequency", HTTP_PUT, api_pwm_frequency);
+  server.on("/api/v1/pwm/range", HTTP_PUT, api_pwm_range);
+
+  // LED
+  server.on("/api/v1/led/duty", HTTP_GET | HTTP_PUT, api_led(api_led_duty));
+  server.on("/api/v1/led/on", HTTP_GET | HTTP_PUT, api_led(api_led_on));
+  server.on("/api/v1/led/off", HTTP_GET | HTTP_PUT, api_led(api_led_off));
+}
 
 // Common Arduino functions
 void setup()
@@ -187,6 +224,7 @@ void setup()
   Serial.begin(9600);
   delay(1000);
   Serial.println("Serial done");
+
   // connect to WiFi
   WiFi.mode(WIFI_STA);
   WiFi.begin(SSID, PASS);
@@ -198,17 +236,12 @@ void setup()
   Serial.println(WiFi.localIP());
 
   // prepare server
-  AsyncElegantOTA.begin(&server);
+  setupAPI();
 
-  // PWM
-  server.on("/api/v1/pwm/frequency", HTTP_PUT, api_pwm_frequency);
-  server.on("/api/v1/pwm/range", HTTP_PUT, api_pwm_range);
-
-  // LED
-  server.on("/api/v1/led/duty", HTTP_GET | HTTP_PUT, api_led(api_led_duty));
-  server.on("/api/v1/led/on", HTTP_GET | HTTP_PUT, api_led(api_led_on));
-  server.on("/api/v1/led/off", HTTP_GET | HTTP_PUT, api_led(api_led_off));
   server.begin();
+
+  // listen for udp packets
+  setupUdp();
 }
 
 void loop()

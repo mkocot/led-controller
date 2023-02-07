@@ -13,6 +13,7 @@ private:
 
 public:
   LED(uint8_t _pin) : pin(_pin) {}
+  LED(uint8_t _pin, uint8_t _duty): pin(_pin), duty(_duty) {}
 
   void begin()
   {
