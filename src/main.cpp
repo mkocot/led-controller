@@ -10,6 +10,8 @@
 #include <map>
 #include <string>
 
+using LED = LED_10B;
+
 std::array<LED, 4> LEDS = {
     LED(D1, 0),
     LED(D2, 0),
@@ -115,7 +117,12 @@ static std::function<void(AsyncWebServerRequest *)> api_led(const led_action f)
   };
 }
 
-void api_pwm_range(AsyncWebServerRequest *req) {}
+void api_pwm_range(AsyncWebServerRequest *req) {
+    String resp;
+    resp += LED::duty_max;
+    req->send(200, "text/plain", resp);
+}
+
 void api_pwm_frequency(AsyncWebServerRequest *req)
 {
   if (req->method() != HTTP_PUT)
@@ -149,8 +156,7 @@ void api_led_duty(AsyncWebServerRequest *req, LED &l)
     return;
   }
 
-  duty &= 0xFF;
-  l.dutycycle(static_cast<uint8_t>(duty));
+  l.dutycycle(static_cast<LED::duty_type>(duty));
   req->send(200, "text/plain", "OK");
 }
 
@@ -177,12 +183,14 @@ void api_led_off(AsyncWebServerRequest *req, LED &l)
 }
 
 void udp_api_packet(AsyncUDPPacket packet) {
-  // Expecting 4 bytes
-  // [R][G][B][W]
-  if (packet.length() != 4) {
+  // Expecting 4 * sizeof(LED::duty_type) bytes
+  // So it's either uint32_t or uint64_t
+  // [R]x[G]x[B]x[W]x
+  if (packet.length() != 4 * sizeof(LED::duty_type)) {
     return;
   }
-  auto data = packet.data();
+
+  auto data = reinterpret_cast<LED::duty_type*>(packet.data());
   LEDS[LED_RED].dutycycle(data[0]);
   LEDS[LED_GREEN].dutycycle(data[1]);
   LEDS[LED_BLUE].dutycycle(data[2]);
@@ -203,7 +211,7 @@ static void setupAPI() {
 
   // PWM
   server.on("/api/v1/pwm/frequency", HTTP_PUT, api_pwm_frequency);
-  server.on("/api/v1/pwm/range", HTTP_PUT, api_pwm_range);
+  server.on("/api/v1/pwm/range", HTTP_GET, api_pwm_range);
 
   // LED
   server.on("/api/v1/led/duty", HTTP_GET | HTTP_PUT, api_led(api_led_duty));
@@ -214,6 +222,9 @@ static void setupAPI() {
 // Common Arduino functions
 void setup()
 {
+  // should be set on and another or just settings range is sufficient
+  //analogWriteResolution(10);// 10bits
+  analogWriteRange(LED::duty_max);
   // First ensure PWM is correctly set so we don't wait for wifi with all LEDs
   // at full power
   for (auto &led : LEDS)

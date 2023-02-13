@@ -3,17 +3,25 @@
 
 #include <Arduino.h>
 
-class LED
+#include <type_traits>
+
+template<int RANGE>
+class LED_T
 {
+  public:
+  // use uint8_t up to (inclusive) uint8_t max
+  using duty_type = typename std::conditional<(RANGE <= std::numeric_limits<uint8_t>::max()), uint8_t, uint16_t>::type;
+  static constexpr auto duty_max = RANGE;
 private:
   uint8_t pin;
   // TODO(m): Set to 0 if done fiddling with it
-  uint16_t duty{128};
+  duty_type duty{RANGE / 2};
   bool is_enabled{false};
 
 public:
-  LED(uint8_t _pin) : pin(_pin) {}
-  LED(uint8_t _pin, uint8_t _duty): pin(_pin), duty(_duty) {}
+
+  LED_T(uint8_t _pin) : pin(_pin) {}
+  LED_T(uint8_t _pin, duty_type _duty): pin(_pin), duty(_duty) {}
 
   void begin()
   {
@@ -25,12 +33,13 @@ public:
   //   log10f(brightness) * 255;
   // }
 
-  void dutycycle(const uint8_t _duty)
+  void dutycycle(const duty_type _duty)
   {
     duty = _duty;
     on();
   }
-  uint8_t dutycycle() const
+
+  duty_type dutycycle() const
   {
     return duty;
   }
@@ -43,6 +52,7 @@ public:
       return 1;
     }
     analogWriteFreq(_freq);
+    return 0;
   }
 
   void on()
@@ -61,5 +71,8 @@ public:
     return is_enabled;
   }
 };
+
+using LED_8B = LED_T<255>;
+using LED_10B = LED_T<1023>;
 
 #endif
